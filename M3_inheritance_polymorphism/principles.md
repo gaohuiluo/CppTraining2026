@@ -88,7 +88,7 @@ Animal* p = &d;   // 派生类指针能"隐式向上转型"成基类指针，安
 
 链式继承指的是一条继承链，一层接一层。比如：
 
-```Cpp
+```cpp
 class A {
 public:
     void funcA() { }
@@ -112,6 +112,70 @@ int main() {
     obj.funcC();  // 来自 C 自己
     return 0;
 }
+```
+
+### has-a 组合 替代 多层继承
+
+注意这里的构造顺序 A -> B -> C 和继承版本一模一样，原理都是“内层先于外层”。区别在访问方式。
+
+```
+#include <iostream>
+using namespace std;
+
+class A {
+public:
+    A() { cout << "A 构造\n"; }
+    ~A() { cout << "A 析构\n"; }
+    void funcA() { cout << "调用 funcA\n"; }
+};
+
+class B {
+public:
+    B() { cout << "B 构造\n"; }
+    ~B() { cout << "B 析构\n"; }
+    void funcB() { cout << "调用 funcB\n"; }
+
+    A a;   // B 组合了一个 A（B 有一个 A）
+};
+
+class C {
+public:
+    C() { cout << "C 构造\n"; }
+    ~C() { cout << "C 析构\n"; }
+    void funcC() { cout << "调用 funcC\n"; }
+
+    B b;   // C 组合了一个 B（C 有一个 B）
+};
+
+int main() {
+    C obj;
+
+    obj.funcC();        // C 自己的方法
+    obj.b.funcB();      // 通过成员 b 访问 B 的方法
+    obj.b.a.funcA();    // 通过 b.a 访问 A 的方法
+
+    return 0;
+}
+```
+
+组合版如果觉得 obj.b.a.funcA() 太啰嗦，通常会在外层封装一个转发方法，只暴露需要的接口：
+
+```Cpp
+class C {
+public:
+    void funcC() { cout << "调用 funcC\n"; }
+
+    void doA() { b.a.funcA(); }   // 转发，隐藏内部结构
+    void doB() { b.funcB(); }
+
+private:
+    B b;   // 设为 private，外部不能直接碰
+};
+
+// 调用变干净了
+obj.funcC();
+obj.doB();
+obj.doA();
 ```
 
 ---
