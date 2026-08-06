@@ -490,7 +490,7 @@ void share(std::shared_ptr<Widget> w);      // 我要共享所有权 -> 按值�
 
 ---
 
-## 14. 高频面试点（M4 相关）
+## 14. 高频点（M4 相关）
 
 - **`new`/`delete` 和 `malloc`/`free` 的区别？**（是否调用构造/析构、类型安全、返回值、失败处理）
 - **`unique_ptr` 和 `shared_ptr` 的区别？**（独占 vs 共享；不可拷贝只可移动 vs 可拷贝有引用计数；开销）
