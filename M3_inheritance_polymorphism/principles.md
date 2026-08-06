@@ -84,6 +84,36 @@ Animal* p = &d;   // 派生类指针能"隐式向上转型"成基类指针，安
 
 > 记住一句设计原则：**优先组合，慎用继承。** 继承是最强的耦合，只在真正的 is-a 关系下才值得。
 
+### 链式（多层）继承
+
+链式继承指的是一条继承链，一层接一层。比如：
+
+```Cpp
+class A {
+public:
+    void funcA() { }
+};
+
+class B : public A {        // B 继承 A
+public:
+    void funcB() { }
+};
+
+class C : public B {        // C 继承 B，也就间接继承了 A
+public:
+    void funcC() { }
+};
+这里的继承链是 A -> B -> C。此时 C 的对象可以访问三层的公有成员：
+Cpp
+int main() {
+    C obj;
+    obj.funcA();  // 来自 A（间接继承）
+    obj.funcB();  // 来自 B（直接继承）
+    obj.funcC();  // 来自 C 自己
+    return 0;
+}
+```
+
 ---
 
 ## 2. 三种继承方式：public / protected / private
@@ -120,6 +150,26 @@ Priv q; // q.a = 1; 错误：private 继承，a 对外不可见了
 ```
 
 > `struct` 继承默认是 `public`，`class` 继承默认是 `private`。所以你几乎总要显式写 `: public Base`，别漏了 `public`——漏了在 `class` 里就成了 private 继承，向上转型会失败，是个隐蔽坑。
+
+一句话概括：protected 成员对外部隐藏（像 private），但对派生类开放（像 public）。protected 的价值主要体现在继承里。派生类可以直接访问基类的 protected 成员，但无法访问 private 成员。
+
+```c++
+class Base {
+public:
+    int pub = 1;
+protected:
+    int prot = 2;
+private:
+    int priv = 3;
+};
+
+int main() {
+    Base b;
+    b.pub;   // ✅ 外部可访问
+    b.prot;  // ❌ 编译错误：protected 对外部不可见
+    b.priv;  // ❌ 编译错误：private 对外部不可见
+}
+```
 
 ---
 
