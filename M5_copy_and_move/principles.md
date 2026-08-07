@@ -184,6 +184,167 @@ Buffer& Buffer::operator=(const Buffer& other) {
 
 > 进阶写法有 **copy-and-swap**（用拷贝构造 + `std::swap` 一次搞定自赋值和异常安全），练习里会让你见识；入门先把上面这个「检查-分配-释放-接管」四步走记牢。
 
+
+
+#### 深拷贝赋值：Copy-and-Swap 
+
+##### 5.1. 完整代码示例
+
+```cpp
+#include <iostream>
+#include <algorithm> // std::copy
+#include <utility>  // std::swap
+#include <string>
+
+class Buffer {
+private:
+    int* data_;
+    size_t size_;
+    std::string tag_; // 加个标签方便打印看是谁
+
+public:
+    // 1. 普通构造函数
+    Buffer(size_t size, std::string tag) : data_(new int[size]), size_(size), tag_(tag) {
+        std::cout << "  [构造] " << tag_ << " 产生\n";
+    }
+
+    // 2. 拷贝构造函数 (深拷贝)
+    Buffer(const Buffer& other) : data_(new int[other.size_]), size_(other.size_), tag_("拷贝自(" + other.tag_ + ")") {
+        std::copy(other.data_, other.data_ + size_, data_);
+        std::cout << "  [拷贝构造] 造了一个 " << tag_ << "\n";
+    }
+
+    // 3. 析构函数
+    ~Buffer() {
+        std::cout << "  [析构] 销毁 " << tag_ << " (释放内存)\n";
+        delete[] data_;
+    }
+
+    // 4. 友元 swap 函数 (只交换指针，极快且不抛异常 noexcept)
+    friend void swap(Buffer& a, Buffer& b) noexcept {
+        using std::swap;
+        swap(a.data_, b.data_);
+        swap(a.size_, b.size_);
+        swap(a.tag_, b.tag_);
+    }
+
+    // ==========================================
+    // 5. 进阶版赋值运算符 (Copy-and-Swap)
+    // ==========================================
+    Buffer& operator=(Buffer other) noexcept { 
+        // 注意：参数 other 是按值传递的，这里它已经是一个拷贝好的副本了！
+        std::cout << "  [operator=] 开始交换 *this 和 " << other.tag_ << "\n";
+        
+        swap(*this, other); // 把当前对象和副本交换
+        
+        std::cout << "  [operator=] 交换完毕，当前对象现在是 " << tag_ << "\n";
+        return *this;
+    } // 离开作用域，other 析构，带走旧内存！
+
+    void printInfo() const {
+        std::cout << "我是 " << tag_ << "，大小为 " << size_ << "\n";
+    }
+};
+
+int main() {
+    std::cout << "--- 创建 buf1 和 buf2 ---\n";
+    Buffer buf1(10, "buf1");
+    Buffer buf2(20, "buf2");
+
+    std::cout << "\n--- 开始执行 buf1 = buf2 ---\n";
+    buf1 = buf2; 
+
+    std::cout << "\n--- 赋值结束后的状态 ---\n";
+    buf1.printInfo();
+    buf2.printInfo();
+
+    return 0;
+}
+```
+
+---
+
+##### 5.2. 运行结果大揭秘
+
+运行这段代码，你会清楚地看到“按值传递”和“自动析构”是怎么配合工作的：
+
+```text
+--- 创建 buf1 和 buf2 ---
+  [构造] buf1 产生
+  [构造] buf2 产生
+
+--- 开始执行 buf1 = buf2 ---
+  [拷贝构造] 造了一个 拷贝自(buf2)        <-- 1. 发生在传参时（按值传递）
+  [operator=] 开始交换 *this 和 拷贝自(buf2) <-- 2. 交换内部指针
+  [operator=] 交换完毕，当前对象现在是 拷贝自(buf2)
+  [析构] 销毁 buf1 (释放内存)              <-- 3. 临时副本析构，带走了 buf1 原来的旧内存！
+
+--- 赋值结束后的状态 ---
+我是 拷贝自(buf2)，大小为 20
+我是 buf2，大小为 20
+
+  [析构] 销毁 buf2 (释放内存)
+  [析构] 销毁 拷贝自(buf2) (释放内存)
+```
+
+看到了吗？因为按值传递，编译器偷偷帮你调用了**拷贝构造函数**造了一个副本。函数结束时，这个副本又偷偷帮你调用了**析构函数**清理了旧内存！
+
+---
+
+##### 5.3. 把传递和返回的类型掰开揉碎讲
+
+我们重点看这一行：
+```cpp
+Buffer& operator=(Buffer other) noexcept {
+    ...
+    return *this; 
+}
+```
+
+##### 问题 1：参数传递的类型为什么是 `Buffer other`（按值传递）？
+
+传统的写法是 `const Buffer& other`（按const引用传递），但 Copy-and-Swap **故意不用引用，而是按值传递**。这是这种写法最绝妙的设计：
+
+* **按值传递会触发“拷贝构造”**：当执行 `buf1 = buf2` 时，编译器会先用 `buf2` 拷贝构造出一个**全新的、临时的局部对象** `other`。这就是“Copy”的阶段。
+* **天然异常安全**：如果内存不足，拷贝构造失败了（抛出异常），此时还在函数外边，`buf1`（也就是 `*this`）根本没有被修改过，毫发无伤。
+* **天然防自赋值**：如果是 `buf1 = buf1` 呢？编译器会拷贝出一个 `buf1` 的副本 `other`，然后把 `buf1` 和 `other` 互换。逻辑完全正确，绝对不会把自己的内存删了再去读。
+* **充当临时缓冲区**：这个 `other` 拥有独立分配好的新内存。我们只需要把它和当前对象的数据“指针一换”，当前对象就获得了新内存。而 `other` 拿到了旧内存。
+* **自动清理旧资源**：函数执行完毕，局部变量 `other` 的生命周期结束，自动调用析构函数，把交换过来的旧内存 `delete[]` 掉。
+
+**总结一句话**：用按值传递，是为了借用编译器生成临时对象和销毁临时对象的机制，自动帮我们完成了深拷贝和旧内存清理。
+
+#### 问题 2：返回类型为什么是 `Buffer&`（返回对象的引用）？
+
+返回类型是 `Buffer&`，返回的语句是 `return *this;`。
+
+* **为什么返回引用 `&`？**
+  如果返回值是 `Buffer`（按值返回），编译器需要再执行一次拷贝构造，把当前对象拷贝一份返回，这会产生无谓的巨大开销。赋值结束后，原来的对象还在，所以我们直接返回它的**引用**，效率最高，零拷贝。
+* **为什么返回 `*this`？**
+  * `this` 是一个隐含的指针，指向当前正在执行操作的对象（在这个例子里就是 `buf1` 的地址）。
+  * `*this` 解引用这个指针，得到的就是当前对象本身（即 `buf1` 这个实体）。
+  * 返回 `*this` 并加上引用符号 `&`(返回值类型)，意思就是“把赋值后的当前对象本身返回去”。
+
+* **为什么要返回当前对象？**
+  为了支持 C++ 标准库的**链式赋值**语法。比如：
+  ```cpp
+  Buffer a, b, c;
+  a = b = c; 
+  ```
+  这句代码等价于 `a = (b = c);`：
+  1. 先执行 `b = c`，把 `c` 赋值给 `b`。
+  2. 如果 `operator=` 返回了 `*this`（也就是赋值后的 `b`），那么这个返回值就可以继续作为下一个赋值的右值。
+  3. 接着把上一步返回的 `b` 赋值给 `a`。
+  如果不返回 `*this`，链式赋值就会编译报错。
+
+##### 5.4. 核心总结
+
+* **传参类型 `Buffer other`**：按值传递，利用编译器制造临时副本，省去手动写深拷贝代码，保证异常安全和自赋值安全。
+* **返回类型 `Buffer&`**：返回引用避免多余拷贝；返回 `*this` 支持链式赋值。
+
+这就是 Copy-and-Swap 被称为现代 C++ 资源管理“教科书级惯用法”的原因，短短几行代码包含了极深的内力。
+
+
+
 ---
 
 ## 6. 右值 vs 左值：移动的地基
@@ -478,7 +639,7 @@ std::unique_ptr<int> p3 = std::move(p1);  // OK：移动，所有权从 p1 转�
 
 ---
 
-## 15. 高频面试点
+## 15. 高频点
 
 - **Rule of 3 / Rule of 5 / Rule of 0 分别是什么？三者关系？** 什么时候必须写全五个？为什么现代 C++ 推荐 Rule of 0？
 - **拷贝构造和移动构造的区别？** 参数类型（`const T&` vs `T&&`）、语义（复制 vs 偷家）、源对象是否被改动。
